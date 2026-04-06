@@ -1,0 +1,7 @@
+.env
+global-bundle.pem
+__pycache__/
+*.pyc
+.venv/
+*.egg-info/
+dist/
