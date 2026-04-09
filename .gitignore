@@ -5,3 +5,10 @@ __pycache__/
 .venv/
 *.egg-info/
 dist/
+
+# Lambda build artifacts
+*.zip
+layer/
+python/
+.env
+global-bundle.pem
