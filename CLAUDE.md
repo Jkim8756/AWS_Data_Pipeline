@@ -23,11 +23,12 @@ S3 (upload) → Lambda ingest → SQS → Lambda process → Textract
 - **Runtime:** Python 3.12
 - **IAM:** Admin0 user. Lambdas use a dedicated least-privilege execution role.
 - **DB:** RDS Postgres 17.4 — connection details in environment variables, never hardcoded
-- **DB instance identifier:** `database-1`
-- **DB host:** `database-1.cr8owmsee0em.us-east-2.rds.amazonaws.com`
+- **DB instance identifier:** `db-test02`
+- **DB host:** `db-test02.cr8owmsee0em.us-east-2.rds.amazonaws.com`
 
 ## Dev environment
 - **OS:** Windows — use PowerShell, not bash
+- **Env vars:** loaded via `python-dotenv` — keep `.env` file up to date, no need to set `$env:` manually
 - **Venv activate:** `.venv\Scripts\activate` (not `source .venv/bin/activate`)
 - **SSL cert:** `global-bundle.pem` lives in project root, gitignored
 - **Set env vars in PowerShell:** `$env:DB_PASSWORD="value"`
@@ -58,12 +59,15 @@ project/
 - `CONFIDENCE_THRESHOLD` — OCR confidence cutoff (start at 1.0, tune later)
 - `S3_UPLOAD_BUCKET` — `timesheets-pdf-uploads-01`
 - `S3_RAW_JSON_BUCKET` — `timesheet-scanned-raw-json01`
-- `SQS_PROCESS_QUEUE_URL` — main processing queue
-- `SQS_REVIEW_QUEUE_URL` — low-confidence review queue
-- `SQS_DLQ_URL` — dead letter queue
-- `DB_HOST` — `database-1.cr8owmsee0em.us-east-2.rds.amazonaws.com`
+- `SQS_PROCESS_QUEUE_URL` — `https://sqs.us-east-2.amazonaws.com/569239323358/pdf-process-queue`
+- `SQS_REVIEW_QUEUE_URL` — `https://sqs.us-east-2.amazonaws.com/569239323358/pdf-review-queue`
+- `SQS_DLQ_URL` — `https://sqs.us-east-2.amazonaws.com/569239323358/pdf-process-dlq`
+- `TEXTRACT_SNS_TOPIC_ARN` — `arn:aws:sns:us-east-2:569239323358:pdf-textract-completion`
+- `TEXTRACT_ROLE_ARN` — `arn:aws:iam::569239323358:role/pdf-textract-sns-role` (Textract service role, NOT the Lambda execution role)
+- `SSL_CERT_PATH` — RDS SSL cert path; local: `./global-bundle.pem`, Lambda: `/opt/python/global-bundle.pem`
+- `DB_HOST` — `db-test02.cr8owmsee0em.us-east-2.rds.amazonaws.com`
 - `DB_PORT` — `5432`
-- `DB_NAME` — `pdf_pipeline`
+- `DB_NAME` — `postgres` (default, no initial DB name set at creation)
 - `DB_USER` — `postgres`
 - `DB_PASSWORD` — from Secrets Manager (`rds!db-...`)
 

@@ -16,9 +16,14 @@ s3 = boto3.client("s3", region_name="us-east-2")
 
 def _get_blocks(job_id: str) -> list[dict]:
     blocks: list[dict] = []
-    paginator = textract.get_paginator("get_document_text_detection")
-    for page in paginator.paginate(JobId=job_id):
-        blocks.extend(page.get("Blocks", []))
+    kwargs: dict = {"JobId": job_id}
+    while True:
+        response = textract.get_document_text_detection(**kwargs)
+        blocks.extend(response.get("Blocks", []))
+        next_token = response.get("NextToken")
+        if not next_token:
+            break
+        kwargs["NextToken"] = next_token
     return blocks
 
 
