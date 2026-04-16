@@ -6,13 +6,13 @@ Action  : Fetch Textract results, parse timesheet tables, compute
             - high confidence → SQS write queue (or direct DB write)
             - low  confidence → SQS review queue
 """
-import json
+import sys
 import os
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "vendor"))
+
+import json
 import re
 import boto3
-import sys
-sys.path.insert(0, "/opt/python")
-sys.path.insert(0, "/var/task")
 
 from dotenv import load_dotenv
 load_dotenv()
