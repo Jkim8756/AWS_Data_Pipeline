@@ -55,7 +55,7 @@ def _fetch_all_blocks(job_id: str) -> list[dict]:
     """Paginate through all Textract blocks for a job."""
     blocks, next_token = [], None
     while True:
-        kwargs = {"JobId": job_id}
+        kwargs: dict = {"JobId": job_id}
         if next_token:
             kwargs["NextToken"] = next_token
         resp = textract_client.get_document_analysis(**kwargs)
@@ -234,7 +234,7 @@ def _save_raw_json(records: list[dict], job_id: str, source_file: str) -> str:
     return key
 
 
-def handler(event: dict, context) -> dict:
+def lambda_handler(event: dict, context) -> dict:
     write_queue_url  = os.environ["SQS_WRITE_QUEUE_URL"]
     review_queue_url = os.environ["SQS_REVIEW_QUEUE_URL"]
 
