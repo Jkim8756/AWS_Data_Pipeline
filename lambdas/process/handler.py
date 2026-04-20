@@ -18,12 +18,14 @@ def lambda_handler(event: dict, context) -> dict:
             bucket: str = body["bucket"]
             key: str = body["key"]
 
-            response = textract.start_document_text_detection(
+            response = textract.start_document_analysis(
                 DocumentLocation={"S3Object": {"Bucket": bucket, "Name": key}},
+                FeatureTypes=["TABLES", "FORMS"],
                 NotificationChannel={
                     "SNSTopicArn": os.environ["TEXTRACT_SNS_TOPIC_ARN"],
                     "RoleArn": os.environ["TEXTRACT_ROLE_ARN"],
                 },
+                JobTag=key,
             )
             job_id = response["JobId"]
             print(f"Started Textract job {job_id} for s3://{bucket}/{key}")
