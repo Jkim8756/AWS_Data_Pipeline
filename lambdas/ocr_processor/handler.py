@@ -1,3 +1,9 @@
+"""
+Lambda: ocr_processor
+Triggered by SNS notification from Textract on job completion.
+Parses TABLE and FORM blocks, detects column headers dynamically,
+and writes one flat row per employee into timesheet_entries.
+"""
 import json
 import logging
 import os
@@ -12,21 +18,32 @@ logger.setLevel(logging.INFO)
 textract = boto3.client("textract")
 secretsmanager = boto3.client("secretsmanager")
 
-# Column index → field name for the employee roster table
-COL_MAP = {
-    2: "job_task",
-    3: "title",
-    4: "employee_name",
-    5: "ein",
-    6: "scheduled_start",
-    7: "scheduled_end",
-    8: "scheduled_hours",
-    9: "actual_start",
-    10: "lunch_out",
-    11: "lunch_in",
-    12: "actual_end",
-    13: "hours_worked",
-    15: "absent",
+# Normalised header text → DB field name.
+# "no" appears twice (row number and schedule_changed No column),
+# so we track them in order and assign the second "no" to sched_no.
+HEADER_MAP = {
+    "#": "row_no",
+    "no": "row_no",           # first occurrence; second handled in build_col_map()
+    "job task": "job_task",
+    "task": "job_task",
+    "title": "title",
+    "employee name": "employee_name",
+    "name": "employee_name",
+    "ein": "ein",
+    "sched start": "sched_start",
+    "scheduled start": "sched_start",
+    "sched end": "sched_end",
+    "scheduled end": "sched_end",
+    "sched hours": "sched_hours",
+    "scheduled hours": "sched_hours",
+    "actual start": "actual_start",
+    "lunch out": "lunch_out",
+    "lunch in": "lunch_in",
+    "actual end": "actual_end",
+    "hours": "hours_worked",
+    "hours worked": "hours_worked",
+    "absent": "absent",
+    "yes": "sched_yes",       # schedule changed Yes column
 }
 
 
@@ -76,6 +93,7 @@ def get_cell_text(cell: dict, block_map: dict) -> str:
 
 
 def get_table_cells(table: dict, block_map: dict) -> dict:
+    """Return {(row, col): text} for every cell in the table."""
     cells = {}
     for rel in table.get("Relationships", []):
         if rel["Type"] == "CHILD":
@@ -85,6 +103,31 @@ def get_table_cells(table: dict, block_map: dict) -> dict:
                     r, c = cell["RowIndex"], cell["ColumnIndex"]
                     cells[(r, c)] = get_cell_text(cell, block_map)
     return cells
+
+
+def build_col_map(cells: dict) -> dict:
+    """
+    Read row 1 as the header and return {col_index: field_name}.
+    The second "no" column (schedule changed No) is mapped to "sched_no".
+    """
+    max_col = max(c for _, c in cells.keys()) if cells else 0
+    col_map = {}
+    seen_no = False
+
+    for col in range(1, max_col + 1):
+        header_text = cells.get((1, col), "").strip().lower()
+        if not header_text:
+            continue
+        if header_text == "no":
+            if seen_no:
+                col_map[col] = "sched_no"
+                continue
+            seen_no = True
+        field = HEADER_MAP.get(header_text)
+        if field:
+            col_map[col] = field
+
+    return col_map
 
 
 def detect_staff_type(table: dict, blocks: list) -> str:
@@ -112,7 +155,7 @@ def detect_staff_type(table: dict, blocks: list) -> str:
 
 
 def extract_header(blocks: list, page: int) -> dict:
-    """Extract Project, Business Unit, Date from KEY_VALUE_SET blocks on a page."""
+    """Extract key-value form fields (Project, Date, Weather, etc.) from a page."""
     block_map = {b["Id"]: b for b in blocks}
     header = {}
 
@@ -157,135 +200,160 @@ def parse_date(raw: str):
     return None
 
 
-def parse_entries(cells: dict, staff_type: str, page: int, document_id: str,
-                  source_file: str, work_date, project: str, business_unit: str) -> list:
-    if not cells:
+def parse_numeric(val: str):
+    if not val:
+        return None
+    try:
+        return float(val.replace(",", "."))
+    except ValueError:
+        return None
+
+
+def parse_entries(
+    cells: dict,
+    col_map: dict,
+    staff_type: str,
+    source_file: str,
+    textract_job_id: str,
+    work_date,
+    project: str,
+    business_unit: str,
+    day_of_week: str,
+    weather: str,
+) -> list:
+    if not cells or not col_map:
         return []
+
     max_row = max(r for r, _ in cells.keys())
+    has_sched_yes = "sched_yes" in col_map.values()
     entries = []
 
     for row_idx in range(2, max_row + 1):
-        entry = {
-            "document_id": document_id,
+        row = {col: cells.get((row_idx, col), "").strip() for col in col_map}
+
+        # Resolve field values from dynamic col_map
+        def field(name: str) -> str:
+            for col, f in col_map.items():
+                if f == name:
+                    return row.get(col, "")
+            return ""
+
+        employee_name = field("employee_name")
+        if not employee_name:
+            continue  # skip blank/signature-only rows
+
+        absent_raw = field("absent")
+        absent = bool(absent_raw)  # any non-empty text = absent
+
+        schedule_changed = False
+        if has_sched_yes:
+            schedule_changed = bool(field("sched_yes"))
+
+        entries.append({
             "source_file": source_file,
+            "textract_job_id": textract_job_id,
             "work_date": work_date,
-            "project": project,
-            "business_unit": business_unit,
+            "project": project or None,
+            "business_unit": business_unit or None,
+            "day_of_week": day_of_week or None,
+            "weather": weather or None,
             "staff_type": staff_type,
-            "page_number": page,
-        }
-        for col_idx, field in COL_MAP.items():
-            entry[field] = cells.get((row_idx, col_idx), "").strip() or None
-
-        if not entry.get("employee_name"):
-            continue
-
-        for field in ("scheduled_hours", "hours_worked"):
-            val = entry.get(field)
-            if val:
-                try:
-                    entry[field] = float(val.replace(",", "."))
-                except ValueError:
-                    entry[field] = None
-
-        absent_raw = (entry.get("absent") or "").strip().upper()
-        entry["absent"] = absent_raw in ("X", "YES", "Y", "1")
-
-        entries.append(entry)
+            "row_no": int(field("row_no")) if field("row_no").isdigit() else None,
+            "job_task": field("job_task") or None,
+            "title": field("title") or None,
+            "employee_name": employee_name,
+            "ein": field("ein") or None,
+            "sched_start": field("sched_start") or None,
+            "sched_end": field("sched_end") or None,
+            "sched_hours": parse_numeric(field("sched_hours")),
+            "actual_start": field("actual_start") or None,
+            "lunch_out": field("lunch_out") or None,
+            "lunch_in": field("lunch_in") or None,
+            "actual_end": field("actual_end") or None,
+            "hours_worked": parse_numeric(field("hours_worked")),
+            "absent": absent,
+            "schedule_changed": schedule_changed,
+        })
 
     return entries
 
 
-def lambda_handler(event, context):
+def lambda_handler(event: dict, context) -> dict:
     for record in event["Records"]:
         message = json.loads(record["Sns"]["Message"])
         job_id = message["JobId"]
         job_status = message["Status"]
-        document_id = message.get("JobTag") or None
 
-        conn = get_db_connection()
+        if job_status != "SUCCEEDED":
+            logger.warning("Textract job %s status: %s — skipping", job_id, job_status)
+            continue
+
+        s3_key = message.get("DocumentLocation", {}).get("S3ObjectName", "")
+        source_file = s3_key.split("/")[-1] if s3_key else job_id
+
         try:
-            if job_status != "SUCCEEDED":
-                with conn:
-                    with conn.cursor() as cur:
-                        cur.execute(
-                            "UPDATE documents SET job_status = 'FAILED' WHERE textract_job_id = %s",
-                            (job_id,),
-                        )
-                logger.warning("Textract job %s status: %s", job_id, job_status)
-                continue
-
             blocks = get_all_blocks(job_id)
             block_map = {b["Id"]: b for b in blocks}
+            tables = [b for b in blocks if b["BlockType"] == "TABLE"]
 
-            with conn:
-                with conn.cursor() as cur:
-                    if not document_id:
-                        cur.execute(
-                            "SELECT id, s3_key FROM documents WHERE textract_job_id = %s",
-                            (job_id,),
-                        )
-                        row = cur.fetchone()
-                        if not row:
-                            logger.error("No document found for job %s", job_id)
-                            continue
-                        document_id = str(row[0])
+            conn = get_db_connection()
+            try:
+                total_entries = 0
+                with conn:
+                    with conn.cursor() as cur:
+                        for table in tables:
+                            page = table.get("Page", 1)
+                            cells = get_table_cells(table, block_map)
+                            col_map = build_col_map(cells)
 
-                    cur.execute(
-                        "SELECT filename FROM documents WHERE id = %s", (document_id,)
-                    )
-                    source_file = cur.fetchone()[0]
+                            if "employee_name" not in col_map.values():
+                                continue  # not an employee roster table
 
-                    tables = [b for b in blocks if b["BlockType"] == "TABLE"]
-                    total_entries = 0
+                            staff_type = detect_staff_type(table, blocks)
+                            header = extract_header(blocks, page)
 
-                    for table in tables:
-                        page = table.get("Page", 1)
-                        cells = get_table_cells(table, block_map)
-                        staff_type = detect_staff_type(table, blocks)
+                            project = header.get("project") or header.get("project name") or ""
+                            business_unit = header.get("business unit") or header.get("bu") or ""
+                            day_of_week = header.get("day of week") or header.get("day") or ""
+                            weather = header.get("weather") or ""
+                            work_date = parse_date(header.get("date", ""))
 
-                        header = extract_header(blocks, page)
-                        project = (
-                            header.get("project") or
-                            header.get("project name") or ""
-                        )
-                        business_unit = header.get("business unit") or header.get("bu") or ""
-                        date_raw = header.get("date") or ""
-                        work_date = parse_date(date_raw)
-
-                        entries = parse_entries(
-                            cells, staff_type, page, document_id,
-                            source_file, work_date, project, business_unit
-                        )
-
-                        for e in entries:
-                            cur.execute(
-                                """
-                                INSERT INTO work_entries
-                                    (document_id, source_file, work_date, project,
-                                     business_unit, staff_type, job_task, title,
-                                     employee_name, ein, scheduled_start, scheduled_end,
-                                     scheduled_hours, actual_start, lunch_out, lunch_in,
-                                     actual_end, hours_worked, absent, page_number)
-                                VALUES
-                                    (%(document_id)s, %(source_file)s, %(work_date)s, %(project)s,
-                                     %(business_unit)s, %(staff_type)s, %(job_task)s, %(title)s,
-                                     %(employee_name)s, %(ein)s, %(scheduled_start)s, %(scheduled_end)s,
-                                     %(scheduled_hours)s, %(actual_start)s, %(lunch_out)s, %(lunch_in)s,
-                                     %(actual_end)s, %(hours_worked)s, %(absent)s, %(page_number)s)
-                                """,
-                                e,
+                            entries = parse_entries(
+                                cells, col_map, staff_type,
+                                source_file, job_id,
+                                work_date, project, business_unit,
+                                day_of_week, weather,
                             )
-                            total_entries += 1
 
-                    cur.execute(
-                        "UPDATE documents SET job_status = 'SUCCEEDED' WHERE id = %s",
-                        (document_id,),
-                    )
+                            for e in entries:
+                                cur.execute(
+                                    """
+                                    INSERT INTO timesheet_entries (
+                                        source_file, textract_job_id, work_date,
+                                        project, business_unit, day_of_week, weather,
+                                        staff_type, row_no, job_task, title,
+                                        employee_name, ein, sched_start, sched_end,
+                                        sched_hours, actual_start, lunch_out, lunch_in,
+                                        actual_end, hours_worked, absent, schedule_changed
+                                    ) VALUES (
+                                        %(source_file)s, %(textract_job_id)s, %(work_date)s,
+                                        %(project)s, %(business_unit)s, %(day_of_week)s, %(weather)s,
+                                        %(staff_type)s, %(row_no)s, %(job_task)s, %(title)s,
+                                        %(employee_name)s, %(ein)s, %(sched_start)s, %(sched_end)s,
+                                        %(sched_hours)s, %(actual_start)s, %(lunch_out)s, %(lunch_in)s,
+                                        %(actual_end)s, %(hours_worked)s, %(absent)s, %(schedule_changed)s
+                                    )
+                                    """,
+                                    e,
+                                )
+                                total_entries += 1
 
-            logger.info(
-                "Wrote %d work entries for document %s", total_entries, document_id
-            )
+                logger.info("Wrote %d entries for job %s (%s)", total_entries, job_id, source_file)
+            finally:
+                conn.close()
 
-        finally:
-            conn.close()
+        except Exception as e:
+            logger.error("Error processing job %s: %s", job_id, e)
+            raise
+
+    return {"statusCode": 200}
