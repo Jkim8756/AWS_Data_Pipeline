@@ -3,20 +3,27 @@
 
 # Compiled Lambda layer binaries
 layers/psycopg2/python/
+layer/
+python/
+*.zip
 
 # Python cache
 **/__pycache__/
 **/*.pyc
 **/*.pyo
 .pytest_cache/
+*.egg-info/
+dist/
 
 # CDK output
 infra/cdk.out/
 infra/.venv/
+.venv/
 
-# Environment files (safety net)
+# Environment files
 .env
 .env.*
+global-bundle.pem
 
 # macOS
 .DS_Store
