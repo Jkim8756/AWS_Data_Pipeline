@@ -1,0 +1,22 @@
+# Claude Code local settings
+.claude/settings.local.json
+
+# Compiled Lambda layer binaries
+layers/psycopg2/python/
+
+# Python cache
+**/__pycache__/
+**/*.pyc
+**/*.pyo
+.pytest_cache/
+
+# CDK output
+infra/cdk.out/
+infra/.venv/
+
+# Environment files (safety net)
+.env
+.env.*
+
+# macOS
+.DS_Store
