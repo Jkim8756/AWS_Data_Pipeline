@@ -25,5 +25,11 @@ infra/.venv/
 .env.*
 global-bundle.pem
 
+# Terraform state (may contain sensitive resource data)
+terraform.tfstate
+terraform.tfstate.backup
+**/.terraform/
+**/.terraform.lock.hcl
+
 # macOS
 .DS_Store
