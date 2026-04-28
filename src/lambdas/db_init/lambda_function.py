@@ -10,10 +10,11 @@ def get_db_conn():
         boto3.client("secretsmanager")
         .get_secret_value(SecretId=os.environ["DB_SECRET_ARN"])["SecretString"]
     )
+    # Secret only holds credentials; host/dbname come from env vars
     return psycopg2.connect(
-        host=secret["host"],
-        port=secret.get("port", 5432),
-        dbname=secret["dbname"],
+        host=os.environ["DB_HOST"],
+        port=int(os.environ.get("DB_PORT", "5432")),
+        dbname=os.environ.get("DB_NAME", "ocrdb"),
         user=secret["username"],
         password=secret["password"],
     )

@@ -191,3 +191,46 @@ resource "aws_lambda_function" "db_init" {
     log_group  = "/aws/lambda/db-init"
   }
 }
+
+# -----------------------------------------------------------
+# Lambda: db-query
+# Trigger: manual invocation — returns document_pages rows as JSON
+# Accepts: { "file_name": "optional filter", "limit": 50 }
+# Runtime: Python 3.13 | Timeout: 30s | Memory: 128MB
+# VPC: yes | SG: default (sg-006065c5ca0e2dade)
+# -----------------------------------------------------------
+resource "aws_lambda_function" "db_query" {
+  function_name = "db-query"
+  role          = aws_iam_role.ocr_pipeline_lambda_role.arn
+  handler       = "lambda_function.lambda_handler"
+  runtime       = "python3.13"
+  timeout       = 30
+  memory_size   = 128
+  architectures = ["x86_64"]
+
+  filename = "${path.module}/db-query.zip"
+
+  layers = [local.lambda_layer_arn]
+
+  environment {
+    variables = local.common_env
+  }
+
+  vpc_config {
+    subnet_ids         = local.lambda_vpc_config_subnets
+    security_group_ids = [aws_security_group.ocr_lambda_default_sg.id]
+  }
+
+  tracing_config {
+    mode = "PassThrough"
+  }
+
+  ephemeral_storage {
+    size = 512
+  }
+
+  logging_config {
+    log_format = "Text"
+    log_group  = "/aws/lambda/db-query"
+  }
+}
