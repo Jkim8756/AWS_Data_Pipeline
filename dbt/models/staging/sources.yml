@@ -1,0 +1,21 @@
+version: 2
+
+sources:
+  - name: public
+    schema: public
+    tables:
+      - name: documents
+        description: "One row per PDF file processed by the OCR pipeline."
+        columns:
+          - name: id
+            description: "Primary key"
+          - name: file_hash
+            description: "SHA-256 of the original PDF — used for deduplication"
+          - name: status
+            description: "pending | processing | done | error"
+
+      - name: document_pages
+        description: "One row per page, with raw text and Claude-structured JSON."
+        columns:
+          - name: structured_data
+            description: "JSONB from Claude Vision — employees, entries, pay period, etc."
