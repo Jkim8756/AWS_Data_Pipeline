@@ -1,82 +1,47 @@
-# CLAUDE.md
+# Project: Timesheet ETL Pipeline
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+## Purpose
 
-## Architecture
+This project automates the extraction and transformation of handwritten timesheet data for a cleaning company. Non-technical staff scan paper timesheets and upload them as PDFs to an S3 bucket. The pipeline picks those files up automatically, uses Claude's vision capabilities to read the handwritten content, and writes structured employee attendance and hours data into a PostgreSQL database. The end goal is a ready-to-use database with clean, analytics-ready data that downstream teams can query without any manual data entry or cleanup.
 
-Serverless OCR pipeline on AWS:
+---
 
-```
-PDF → S3 (ocr-input-*) → ocr-trigger Lambda → AWS Textract (async)
-                                                      ↓
-                                        SNS (textract-completion)
-                                                      ↓
-                                        ocr-processor Lambda → Aurora PostgreSQL (ocrdb)
-```
+## Agentic Structure
 
-- **ocr-trigger**: Fires on S3 `ObjectCreated:*.pdf`, starts an async Textract job with the SNS completion topic.
-- **ocr-processor**: Subscribes to SNS, retrieves Textract results, writes extracted text to Aurora.
-- **db-init**: Manually invoked Lambda for schema setup and migrations.
-- All Lambdas run Python 3.13 in the default VPC, sharing the `psycopg2-python313` Lambda layer and `ocr-pipeline-lambda-role`.
-- DB credentials are fetched at runtime from Secrets Manager via `DB_SECRET_ARN` (except `db-init`, which still uses a plaintext `DB_PASSWORD` — see security note below).
+The pipeline is composed of three sequential agents or processing layers, each with a distinct responsibility:
 
-## Infrastructure (Terraform)
+**1. Ingestion Agent (AWS Lambda + Claude Vision)**
+A Lambda function is triggered whenever a new PDF lands in the upload S3 bucket. It reads the PDF, sends it to Claude Sonnet via the Anthropic API, and instructs Claude to extract all timesheet fields from every page — including project metadata, employee names, EINs, scheduled and actual hours, absence flags, and schedule change flags. Claude returns a structured JSON object. The raw JSON is immediately saved to a second S3 bucket for audit and replay purposes before any database writes occur.
 
-All IaC lives in `terraform/ocr-pipeline/`. State is stored locally (`terraform.tfstate`) — remote backend is stubbed out but not yet configured.
+**2. Storage Agent (Supabase PostgreSQL)**
+The Lambda function writes the extracted JSON into two Supabase tables. One table tracks each uploaded PDF as a document record. The other stores one row per employee per working day, capturing every field extracted by Claude. Upsert logic ensures that re-uploading the same PDF does not create duplicates.
 
-```bash
-cd terraform/ocr-pipeline
+**3. Transformation Agent (dbt Cloud)**
+A dbt Cloud project runs on a daily schedule against the Supabase database. It performs three transformations: a staging model that cleans and standardizes the raw entries (trimming whitespace, normalizing casing, filtering out rows with missing dates or names); a dimension table that deduplicated employees by their EIN; and a fact table that aggregates hours worked per employee per project per day.
 
-# First-time import of live resources
-bash import.sh
+---
 
-terraform init
-terraform plan    # should show 0 changes against live infra
-terraform apply
-```
+## Infrastructure
 
-**Before applying**, Lambda deployment zips must be present alongside the `.tf` files:
-```bash
-# Download current live code from AWS
-aws lambda get-function --function-name ocr-trigger \
-  --query 'Code.Location' --output text | xargs curl -o ocr-trigger.zip
-aws lambda get-function --function-name ocr-processor \
-  --query 'Code.Location' --output text | xargs curl -o ocr-processor.zip
-aws lambda get-function --function-name db-init \
-  --query 'Code.Location' --output text | xargs curl -o db-init.zip
-```
+The pipeline is provisioned with Terraform. The core AWS resources are two S3 buckets (one for incoming PDFs, one for raw JSON output), an SQS queue with a dead-letter queue for reliable Lambda triggering, and a container-based Lambda function. The Lambda is packaged as a Docker image to cleanly handle Python dependencies. Environment variables supply database credentials and the Anthropic API key; in production the API key should be stored in AWS Secrets Manager rather than as a plaintext environment variable.
 
-## Deploying Lambda code changes
+---
 
-Zip the updated handler and update the function directly, then record the change in Terraform:
-```bash
-zip ocr-trigger.zip lambda_function.py
-aws lambda update-function-code --function-name ocr-trigger --zip-file fileb://ocr-trigger.zip
-# Then move the zip to terraform/ocr-pipeline/ and run terraform plan to confirm no drift
-```
+## Expected Outcome
 
-## Manual pipeline test
+A fully populated Supabase PostgreSQL database with two layers of tables:
 
-Upload a PDF to the input bucket to trigger the full pipeline:
-```bash
-aws s3 cp src/input/sample.pdf s3://ocr-input-569239323358-us-east-1/
-# Monitor logs
-aws logs tail /aws/lambda/ocr-trigger --follow
-aws logs tail /aws/lambda/ocr-processor --follow
-```
+- **Raw tables** (`timesheet_documents`, `timesheet_entries`) — one row per PDF and one row per employee per day, populated automatically whenever a PDF is uploaded.
+- **Clean analytics tables** (`stg_timesheet_entries`, `dim_employees`, `fct_daily_hours`) — produced by dbt, with normalized names, typed columns, and deduplicated employee records.
 
-## Key resources
+The database is ready to use for payroll verification, attendance reporting, and project-level labor analysis without any manual data entry.
 
-| Resource | Name |
-|---|---|
-| S3 input bucket | `ocr-input-569239323358-us-east-1` |
-| Aurora cluster endpoint | `ocrdb.cluster-cg50w40uytey.us-east-1.rds.amazonaws.com` |
-| SNS topic | `arn:aws:sns:us-east-1:569239323358:textract-completion` |
-| DB secret | `arn:aws:secretsmanager:us-east-1:569239323358:secret:ocr-pipeline/db-credentials-7dbJsg` |
+---
 
-## Security notes
+## Key Design Decisions
 
-- **db-init `DB_PASSWORD`**: plaintext password is set directly in the Lambda env var. Rotate and replace with `DB_SECRET_ARN` (the same pattern used by the other two Lambdas).
-- **RDS encryption**: `storage_encrypted = false` on the live cluster. Enabling requires cluster replacement.
-- `deletion_protection = false` and `prevent_destroy = true` (Terraform lifecycle) — the latter is the only guard against accidental cluster deletion right now.
-- Follow least-privilege IAM: each Lambda role should only hold the permissions it actually exercises.
+- Claude Sonnet is used over Haiku for better accuracy on mixed print-and-handwritten content.
+- SQS decouples S3 events from Lambda invocations so retries and failure handling are automatic.
+- Raw JSON is always saved to S3 before the database write, enabling replay if the schema changes or a write fails.
+- Time values are stored as raw text in the database and normalized only in the dbt staging layer, because handwritten time formats are inconsistent across pages.
+- Supabase's Session Pooler on port 5432 is used for Lambda connections; switching to Transaction Pooler on port 6543 is the scaling path if concurrent invocations exhaust the connection limit.

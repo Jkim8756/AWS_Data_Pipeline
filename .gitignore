@@ -1,35 +1,28 @@
-# Claude Code local settings
-.claude/settings.local.json
-
-# Compiled Lambda layer binaries
-layers/psycopg2/python/
-layer/
-python/
-*.zip
-
-# Python cache
-**/__pycache__/
-**/*.pyc
-**/*.pyo
-.pytest_cache/
-*.egg-info/
-dist/
-
-# CDK output
-infra/cdk.out/
-infra/.venv/
-.venv/
-
-# Environment files
+# Environment / secrets
 .env
 .env.*
-global-bundle.pem
+!.env.example
 
-# Terraform state (may contain sensitive resource data)
-terraform.tfstate
-terraform.tfstate.backup
+# Terraform
+terraform/timesheet-pipeline/.terraform/
+terraform/timesheet-pipeline/terraform.tfstate
+terraform/timesheet-pipeline/terraform.tfstate.backup
+terraform/timesheet-pipeline/terraform.tfvars
+terraform/timesheet-pipeline/.terraform.lock.hcl
 **/.terraform/
-**/.terraform.lock.hcl
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.tfvars.example
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+dist/
+*.egg-info/
 
 # macOS
 .DS_Store
