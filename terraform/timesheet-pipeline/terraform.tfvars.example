@@ -1,0 +1,12 @@
+aws_region           = "us-east-2"
+upload_bucket_name   = "timesheets-pdf-uploads-01"
+raw_json_bucket_name = "timesheet-scanned-raw-json01"
+
+# Secrets — copy this file to terraform.tfvars and fill in real values
+# Never commit terraform.tfvars
+anthropic_api_key = "sk-ant-..."
+db_host           = "db.<project-ref>.supabase.co"
+db_name           = "postgres"
+db_user           = "postgres"
+db_password       = "your-supabase-password"
+db_port           = "5432"

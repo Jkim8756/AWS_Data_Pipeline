@@ -1,5 +1,14 @@
-# Secrets
+# Environment / secrets
 .env
+.env.*
+!.env.example
+
+# Terraform
+**/.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.tfvars.example
 
 # Python
 __pycache__/
@@ -8,9 +17,9 @@ __pycache__/
 *.pyd
 .venv/
 venv/
-*.egg-info/
 dist/
 build/
+*.egg-info/
 
 # Docker
 *.log
