@@ -1,0 +1,38 @@
+version: "3.9"
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ocr
+      POSTGRES_PASSWORD: ocr
+      POSTGRES_DB: ocrdb
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ocr -d ocrdb"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  pipeline:
+    build:
+      context: ./pipeline
+    env_file: .env
+    environment:
+      DATABASE_URL: "postgresql://ocr:ocr@db:5432/ocrdb"
+      INPUT_DIR: "/input"
+    volumes:
+      - ./input:/input
+    depends_on:
+      db:
+        condition: service_healthy
+    # Override CMD to use the API instead of watcher:
+    # command: ["uvicorn", "api:app", "--host", "0.0.0.0", "--port", "8000"]
+    ports:
+      - "8000:8000"  # only exposed when running in API mode
+
+volumes:
+  pgdata:

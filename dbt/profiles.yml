@@ -1,0 +1,12 @@
+timesheet_ocr:
+  target: dev
+  outputs:
+    dev:
+      type: postgres
+      host:     "{{ env_var('DBT_DB_HOST', 'localhost') }}"
+      port:     "{{ env_var('DBT_DB_PORT', '5432') | int }}"
+      dbname:   "{{ env_var('DBT_DB_NAME', 'ocrdb') }}"
+      user:     "{{ env_var('DBT_DB_USER', 'ocr') }}"
+      password: "{{ env_var('DBT_DB_PASS', 'ocr') }}"
+      schema:   marts
+      threads:  4

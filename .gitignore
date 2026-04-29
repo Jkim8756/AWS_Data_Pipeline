@@ -4,11 +4,6 @@
 !.env.example
 
 # Terraform
-terraform/timesheet-pipeline/.terraform/
-terraform/timesheet-pipeline/terraform.tfstate
-terraform/timesheet-pipeline/terraform.tfstate.backup
-terraform/timesheet-pipeline/terraform.tfvars
-terraform/timesheet-pipeline/.terraform.lock.hcl
 **/.terraform/
 *.tfstate
 *.tfstate.*
@@ -19,10 +14,24 @@ terraform/timesheet-pipeline/.terraform.lock.hcl
 __pycache__/
 *.pyc
 *.pyo
+*.pyd
 .venv/
 venv/
 dist/
+build/
 *.egg-info/
+
+# Docker
+*.log
+
+# dbt
+dbt/target/
+dbt/dbt_packages/
+dbt/logs/
+
+# Input / output files
+input/*.pdf
+input/*.png
 
 # macOS
 .DS_Store

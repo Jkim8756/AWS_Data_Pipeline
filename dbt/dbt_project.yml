@@ -1,0 +1,21 @@
+name: timesheet_ocr
+version: "1.0.0"
+config-version: 2
+
+profile: timesheet_ocr
+
+model-paths: ["models"]
+analysis-paths: ["analyses"]
+test-paths: ["tests"]
+seed-paths: ["seeds"]
+macro-paths: ["macros"]
+
+target-path: "target"
+clean-targets: ["target", "dbt_packages"]
+
+models:
+  timesheet_ocr:
+    staging:
+      +materialized: view
+    marts:
+      +materialized: table
